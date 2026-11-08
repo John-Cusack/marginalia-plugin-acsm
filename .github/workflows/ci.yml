@@ -43,15 +43,30 @@ jobs:
         run: pytest tests/unit -q
 
       # The vendored OCR client must not drift from the pack it was copied from.
-      # The sibling distribution is not on PyPI, so clone it; if that is
-      # unavailable the guard skips (and says so) rather than passing quietly.
+      # The sibling distribution is not on PyPI, so clone the branch that carries
+      # the packaged layout. When it cannot be installed the guard cannot run at
+      # all: say so loudly and do NOT invoke pytest — the guard's module-level
+      # importorskip makes pytest exit 5 ("no tests ran"), which would fail this
+      # job for an environment gap and hide the real signal.
       - name: Vendored protocol guard
         run: |
           set -o pipefail
-          git clone --depth 1 https://github.com/John-Cusack/marginalia-plugin-kindle /tmp/kindle-repo \
-            && pip install --no-deps -e /tmp/kindle-repo >/dev/null \
-            || echo "sibling pack unavailable; the protocol guard will skip"
-          pytest tests/unit/test_vendored_protocol.py -q -rs
+          installed=""
+          for ref in ocr-offload main; do
+            if git clone --depth 1 --branch "$ref" \
+                 https://github.com/John-Cusack/marginalia-plugin-kindle /tmp/kindle-repo \
+               && pip install --no-deps -e /tmp/kindle-repo >/dev/null 2>&1; then
+              installed="$ref"
+              break
+            fi
+            rm -rf /tmp/kindle-repo
+          done
+          if [ -n "$installed" ]; then
+            echo "sibling pack installed from '$installed'"
+            pytest tests/unit/test_vendored_protocol.py -q -rs
+          else
+            echo "::warning::the sibling pack could not be installed, so the vendored protocol guard did NOT run"
+          fi
 
       - name: Build and check the artefact
         run: |

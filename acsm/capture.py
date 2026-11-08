@@ -155,12 +155,20 @@ class Display:
 
 async def find_window(display: str, title: str = READER_TITLE) -> str:
     """Return the reader's window id. Ambiguity is an error, not a guess."""
-    out = await run_command(
-        ["xdotool", "search", "--onlyvisible", "--name", title],
-        env=_child_env(display),
-        capture_stdout=True,
-        timeout=20.0,
-    )
+    try:
+        out = await run_command(
+            ["xdotool", "search", "--onlyvisible", "--name", title],
+            env=_child_env(display),
+            capture_stdout=True,
+            timeout=20.0,
+        )
+    except RuntimeError as exc:
+        # `xdotool search` exits non-zero when nothing matches, which means
+        # "no window" — not a broken tool. Raising its exit code to the
+        # operator would hide the one thing they need to know, so treat it as
+        # an empty result and let the check below produce the real message.
+        log.debug("window_search_found_nothing", title=title, reason=str(exc)[:120])
+        out = b""
     ids = [line.strip() for line in out.decode("utf-8", "replace").split() if line.strip()]
     if not ids:
         raise RuntimeError(

@@ -1,0 +1,146 @@
+# Approval contract for the ACSM pack.
+#
+# This file is byte-identical to acsm/plugin.yaml in the built wheel. The
+# operator approves exactly this manifest (hash included) before core imports
+# the package; a change here requires `research-engine plugin approve-upgrade`.
+#
+# Permissions disclosure (constitution §III): `subprocess: true` grants the
+# pack the ability to run Windows software (Adobe Digital Editions) under Wine
+# with the operator's own privileges. Approve this pack only if that is
+# acceptable on this host.
+schema_version: 2
+plugin_id: acsm
+
+requires:
+  core_api: ">=0.6,<0.7"
+  python: ">=3.11"
+
+permissions:
+  # Egress is used only for the operator-configured OCR endpoint. No fixed host
+  # is baked into the distributed artefact, so the allowlist is empty.
+  network: egress
+  network_allowlist: []
+  subprocess: true
+  filesystem: read_write_plugin_data
+  ingest: true
+
+provides:
+  document_types:
+    - id: drm_pdf
+      default_chunker: prose_window
+
+  mcp_tools:
+    - id: acsm.fulfill_document
+      entry: acsm.tools.fulfill_document:handler
+      description: >-
+        Open an .acsm fulfillment file with Adobe Digital Editions under Wine and
+        return the fulfilled container's stable document key. Requires an
+        activated Wine prefix; activation is performed once, interactively, by
+        the operator.
+      input_schema:
+        type: object
+        properties:
+          acsm_path:
+            type: string
+            description: Path to the .acsm file.
+          loan_expires_at:
+            type: string
+            description: Optional ISO 8601 expiry date for this loan, recorded in metadata.
+          force_refill:
+            type: boolean
+            default: false
+            description: Re-open the .acsm even if a fulfilled container is already known.
+        required: [acsm_path]
+
+    - id: acsm.scrape_document
+      entry: acsm.tools.scrape_document:handler
+      description: >-
+        Page through a fulfilled document in Adobe Digital Editions on a private
+        Xvfb display, OCR every page, and cache the text with a provenance
+        sidecar. Does NOT ingest into the corpus — use acsm.ingest_document.
+      input_schema:
+        type: object
+        properties:
+          document_key:
+            type: string
+            description: The key returned by acsm.fulfill_document.
+          page_delay_min: {type: number, default: 1.5}
+          page_delay_max: {type: number, default: 4.0}
+          max_pages:
+            type: [integer, "null"]
+            default: null
+            description: Stop after N pages (null = until the document ends).
+          max_consecutive_stale:
+            type: integer
+            default: 4
+            description: >-
+              End the capture after this many consecutive turns where the frame
+              did not change.
+          max_consecutive_empty:
+            type: integer
+            default: 20
+            description: >-
+              End the capture after this many consecutive pages with no OCR text.
+              Image inserts and blank pages legitimately raise this.
+          force_rescrape:
+            type: boolean
+            default: false
+            description: Capture again even if cached text already exists.
+        required: [document_key]
+
+    - id: acsm.ingest_document
+      entry: acsm.tools.ingest_document:handler
+      description: >-
+        Capture (if needed) and ingest a fulfilled document into the corpus as
+        document_type='drm_pdf'. Idempotent: returns the existing document_id
+        when the same cache path has already been ingested.
+      input_schema:
+        type: object
+        properties:
+          document_key: {type: string, description: The document key.}
+          title:
+            type: string
+            description: Override the title recorded in the capture sidecar.
+          edition_key:
+            type: string
+            description: >-
+              Edition identity for citations, e.g. the print ISBN. Recommended:
+              loan text is a reading copy, not an authoritative edition.
+          reviewed:
+            type: boolean
+            default: false
+            description: Records that a human checked the captured text.
+          force_rescrape: {type: boolean, default: false}
+          force_reingest:
+            type: boolean
+            default: false
+            description: Ingest a new document even if one exists for this source.
+          quality_floor:
+            type: number
+            default: 0.6
+            description: Pages below this OCR confidence are listed in the sidecar.
+        required: [document_key]
+
+    - id: acsm.check_document
+      entry: acsm.tools.check_document:handler
+      description: >-
+        Report fulfillment, cache, review, capture-quality and corpus state for
+        one document key.
+      input_schema:
+        type: object
+        properties:
+          document_key: {type: string, description: The document key.}
+        required: [document_key]
+
+    - id: acsm.list_documents
+      entry: acsm.tools.list_documents:handler
+      description: >-
+        List documents known to the pack, joining the local cache with matching
+        corpus documents.
+      input_schema:
+        type: object
+        properties:
+          include_ingested:
+            type: boolean
+            default: true
+            description: If true, look up matching corpus documents.

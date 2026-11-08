@@ -71,7 +71,7 @@ jobs:
       - name: Build and check the artefact
         run: |
           pip install build twine
-          python -m build --wheel --out-dir dist
+          python -m build --wheel --outdir dist
           twine check --strict dist/*.whl
 
       - name: Wheel contract (discovery, permissions, tool catalogue, schemas)

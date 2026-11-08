@@ -1,0 +1,100 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The gate that matters most: everything here runs with no display, no Wine,
+  # no Adobe Digital Editions and no OCR service, which is exactly why the page
+  # loop's I/O is injected (constitution §IV).
+  unit:
+    name: unit (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check acsm tests
+
+      - name: Unit tests
+        run: pytest tests/unit -q
+
+      # The vendored OCR client must not drift from the pack it was copied from.
+      # The sibling distribution is not on PyPI, so clone it; if that is
+      # unavailable the guard skips (and says so) rather than passing quietly.
+      - name: Vendored protocol guard
+        run: |
+          set -o pipefail
+          git clone --depth 1 https://github.com/John-Cusack/marginalia-plugin-kindle /tmp/kindle-repo \
+            && pip install --no-deps -e /tmp/kindle-repo >/dev/null \
+            || echo "sibling pack unavailable; the protocol guard will skip"
+          pytest tests/unit/test_vendored_protocol.py -q -rs
+
+      - name: Build and check the artefact
+        run: |
+          pip install build twine
+          python -m build --wheel --out-dir dist
+          twine check --strict dist/*.whl
+
+      - name: Wheel contract (discovery, permissions, tool catalogue, schemas)
+        run: pytest tests/integration/test_built_wheel.py -q
+
+  # The X11 plumbing (display lifecycle, window lookup, capture, digests) is the
+  # part unit tests cannot reach, so this job installs the tooling and treats a
+  # skip as a failure: a skipped plumbing test is not evidence.
+  integration-x11:
+    name: integration (X11 plumbing)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install X11 tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb x11-utils xdotool imagemagick matchbox-window-manager
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Stub-reader plumbing tests (a skip here fails the job)
+        run: |
+          set -o pipefail
+          pytest tests/integration/test_stub_reader.py -q -rs | tee /tmp/x11.txt
+          if grep -q "SKIPPED" /tmp/x11.txt; then
+            echo "::error::X11 tooling missing: the plumbing tests must actually run"
+            exit 1
+          fi
+
+      # Not a CI job yet, deliberately: proving the ingest path end to end needs
+      # core, a database and the fixture embedder. Tracked as the follow-up in
+      # specs/001-acsm-drm-ingestion/tasks.md rather than faked here.

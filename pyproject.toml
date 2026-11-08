@@ -1,0 +1,68 @@
+[project]
+name = "marginalia-ai-plugin-acsm"
+version = "0.1.0"
+description = "Adobe-DRM (.acsm/ADE) page-capture and ingestion plugin for Research Engine"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "MarginaliaAI" }]
+keywords = ["acsm", "adobe-digital-editions", "ocr", "mcp", "marginalia-ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Text Processing :: Indexing",
+]
+dependencies = [
+    "pillow>=10.0",
+    "httpx>=0.27",
+    "structlog>=24.0",
+    "marginalia-ai-sdk>=0.6.1,<1",
+]
+
+[project.optional-dependencies]
+# Local (laptop) OCR path. The remote CUDA service needs no extra here.
+gpu-ocr = ["easyocr==1.7.2"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+    # The local OCR path converts page images to arrays; tests exercise it.
+    "numpy>=1.24",
+]
+
+[project.entry-points."research_engine.plugins"]
+acsm = "acsm"
+
+[project.scripts]
+research-engine-acsm-setup = "acsm.setup:main"
+
+[project.urls]
+Homepage = "https://github.com/John-Cusack/marginalia-plugin-acsm"
+Issues = "https://github.com/John-Cusack/marginalia-plugin-acsm/issues"
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["acsm"]
+
+[tool.hatch.build.targets.sdist]
+include = ["acsm", "tests", "specs", "README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
